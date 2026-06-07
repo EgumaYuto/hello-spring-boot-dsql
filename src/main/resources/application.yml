@@ -11,10 +11,6 @@ spring:
     enabled: true
 
 ---
-# `dsql` profile: Aurora DSQL via the AWS JDBC connector (IAM token auth, no password).
-# Activated in Lambda with SPRING_PROFILES_ACTIVE=dsql. The cluster URL is injected
-# by Terraform via SPRING_DATASOURCE_URL, e.g.
-#   jdbc:aws-dsql:postgresql://<cluster-id>.dsql.<region>.on.aws:5432/postgres
 # Structured (ECS JSON) console logging on Lambda: each log event — including
 # full stack traces — becomes a single JSON line, so CloudWatch shows it as one
 # tidy, filterable event instead of one event per stack-trace line. Local dev
@@ -24,6 +20,11 @@ logging:
   structured:
     format:
       console: ecs
+
+# `dsql` profile: Aurora DSQL via the AWS JDBC connector (IAM token auth, no password).
+# Activated in Lambda with SPRING_PROFILES_ACTIVE=dsql. The cluster URL is injected
+# by Terraform via SPRING_DATASOURCE_URL, e.g.
+#   jdbc:aws-dsql:postgresql://<cluster-id>.dsql.<region>.on.aws:5432/postgres
 spring:
   config:
     activate:
