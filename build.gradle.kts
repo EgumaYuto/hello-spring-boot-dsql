@@ -26,7 +26,16 @@ repositories {
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter")
-    implementation("org.springframework.boot:spring-boot-starter-web")
+    // On Lambda the request handling is done by aws-serverless-java-container's
+    // ServerlessMVC, not a real embedded server. The embedded Tomcat must be
+    // excluded or it starts a second servlet context and the Lambda handler's
+    // DispatcherServlet ends up uninitialized ("ServletConfig has not been
+    // initialized"). Tomcat is added back as developmentOnly for local `bootRun`
+    // (developmentOnly is not on runtimeClasspath, so it stays out of the zip).
+    implementation("org.springframework.boot:spring-boot-starter-web") {
+        exclude(group = "org.springframework.boot", module = "spring-boot-starter-tomcat")
+    }
+    developmentOnly("org.springframework.boot:spring-boot-starter-tomcat")
     implementation("org.springframework.boot:spring-boot-starter-jooq")
 
     // --- Database migration (PostgreSQL-compatible, incl. Aurora DSQL) ---------
@@ -138,8 +147,33 @@ tasks.register<Zip>("lambdaZip") {
 
     from(sourceSets.main.get().output) // classes + resources at zip root
     into("lib") {
-        from(configurations.runtimeClasspath)
+        // productionRuntimeClasspath = runtimeClasspath minus `developmentOnly`,
+        // so the local-only embedded Tomcat is kept out of the deployment package.
+        from(configurations.named("productionRuntimeClasspath"))
     }
+}
+
+// --- One-off Aurora DSQL schema provisioning ---------------------------------
+// Runs org.example.tools.DbInit against DSQL using the JDBC connector (IAM auth
+// from the ambient AWS credentials). Usage:
+//   AWS_PROFILE=sandbox DSQL_JDBC_URL='jdbc:aws-dsql:postgresql://<ep>:5432/postgres?user=admin' \
+//     ./gradlew dsqlInit
+//
+// `sts` is needed only here so the SDK can resolve assume-role AWS profiles when
+// generating the token locally. It is deliberately kept out of the Lambda zip
+// (the function authenticates via its execution role, no assume-role needed).
+val dsqlToolRuntime by configurations.creating {
+    extendsFrom(configurations.named("productionRuntimeClasspath").get())
+}
+dependencies {
+    dsqlToolRuntime("software.amazon.awssdk:sts:2.44.13")
+}
+tasks.register<JavaExec>("dsqlInit") {
+    group = "application"
+    description = "Provision the Aurora DSQL schema (plain JDBC, no Flyway)."
+    dependsOn(tasks.named("classes"))
+    classpath = sourceSets.main.get().output + dsqlToolRuntime
+    mainClass.set("org.example.tools.DbInitKt")
 }
 
 tasks.test {

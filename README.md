@@ -34,14 +34,27 @@ reducible later with [Lambda SnapStart](https://docs.aws.amazon.com/lambda/lates
   `software.amazon.dsql.jdbc.DSQLConnector`, and short-lived auth tokens are
   generated transparently — no password.
 - **Connection lifetime**: DSQL closes connections after 60 minutes, so HikariCP
-  `max-lifetime` is set to 25 min and `maximum-pool-size` to 1 (see
-  `application.yml`, `dsql` profile).
+  `max-lifetime` is set to 25 min (see `application.yml`, `dsql` profile).
+- **No embedded Tomcat on Lambda**: `aws-serverless-java-container` provides its
+  own `ServerlessMVC`, so `spring-boot-starter-tomcat` is excluded from the
+  deployment package (a second servlet context leaves the Lambda handler's
+  DispatcherServlet uninitialized). Tomcat is added back as `developmentOnly` for
+  local `bootRun` — it stays out of the zip via `productionRuntimeClasspath`.
 - **Schema differences** (see `db/migration/V1__create_users_table.sql`):
   - UUID primary key (`gen_random_uuid()`) instead of `AUTO_INCREMENT`.
   - One DDL statement per migration (DSQL allows one DDL per transaction).
   - Secondary/`UNIQUE` indexes need `CREATE INDEX ASYNC` — omitted here.
-- **Flyway** uses AWS's [`aurora-dsql-flyway-support`](https://github.com/awslabs/aurora-dsql-tools/tree/main/flyway)
-  so it understands the DSQL dialect and IAM auth. Migrations run on Lambda boot.
+- **Schema migration on DSQL is provisioned out-of-band, not on Lambda boot.**
+  Flyway is great locally, but running it inside the Lambda against DSQL stalls:
+  creating its own `flyway_schema_history` table involves a secondary index, which
+  DSQL only supports via `CREATE INDEX ASYNC` (built and polled on a *separate*
+  connection) — that deadlocks/stalls during a cold start. So `spring.flyway.enabled`
+  is `false` in the `dsql` profile, and the schema is applied once by the
+  **`dsqlInit`** Gradle task (plain JDBC, single DDL, no secondary index). Locally,
+  Flyway is still used as normal (`./gradlew flywayMigrate`). The AWS
+  [`aurora-dsql-flyway-support`](https://github.com/awslabs/aurora-dsql-tools/tree/main/flyway)
+  artifact is still on the classpath for anyone who wants to drive Flyway against
+  DSQL from a non-Lambda JVM.
 
 ## Local development
 
@@ -73,14 +86,16 @@ $ curl http://127.0.0.1:8080/user    # -> []
 ## Deploy to AWS (Aurora DSQL + Lambda)
 
 Prerequisites:
-- A valid AWS profile. Override with `AWS_PROFILE=...` (default `sandbox`).
+- A valid AWS profile. Override with `AWS_PROFILE=...` (default `sandbox`). An
+  assume-role profile is fine — `dsqlInit` puts `software.amazon.awssdk:sts` on
+  its (local-only) classpath so the SDK can resolve it.
 - A region where **Aurora DSQL is available** (default `us-east-1`; override with
   `REGION=...`). DSQL is not yet in every region.
 - A JDK to launch Gradle (17+); the build targets Java 21 and Gradle
-  auto-provisions a 21 toolchain (the DSQL Flyway support artifact requires 21).
+  auto-provisions a 21 toolchain (the DSQL support artifacts require Java 21).
 
 ```bash
-$ ./scripts/deploy.sh     # build zip -> terraform apply, prints the Function URL
+$ ./scripts/deploy.sh     # build zip -> terraform apply -> dsqlInit, prints the Function URL
 $ ./scripts/teardown.sh   # destroys everything to stop charges
 ```
 
@@ -89,6 +104,14 @@ After `deploy.sh` (the first request is a cold start):
 ```bash
 $ curl https://<function-url>/        # -> Hello World!
 $ curl https://<function-url>/user    # -> [] (reads the Aurora DSQL users table)
+```
+
+Seed a sample row to see it round-trip through DSQL:
+
+```bash
+$ DSQL_SEED=1 DSQL_JDBC_URL="jdbc:aws-dsql:postgresql://<endpoint>:5432/postgres?user=admin" \
+    ./gradlew dsqlInit
+$ curl https://<function-url>/user    # -> [{"id":"...","name":"Ada","email":"ada@example.com"}]
 ```
 
 ## What's deployed
@@ -102,10 +125,9 @@ A single Terraform stack (`infra/aws/`, local state):
 - IAM role granting the Lambda `dsql:DbConnectAdmin` on the cluster (no secrets).
 - CloudWatch log group.
 
-## Status / caveats
+## Status
 
-This was built against the AWS docs for Aurora DSQL's JDBC connector and Flyway
-support. The local build (compile + `lambdaZip`) is verified, but the **live
-DSQL + Lambda path needs a real AWS account to validate end-to-end** — in
-particular Flyway-on-DSQL behaviour and Function URL response handling. Treat the
-first deploy as the integration test.
+Verified end-to-end against a real Aurora DSQL cluster + Lambda Function URL in
+`us-east-1`: `GET /` returns `Hello World!`, and `GET /user` reads the DSQL
+`users` table (returns `[]`, or the seeded row after `DSQL_SEED=1`). Cold start is
+a few seconds; warm requests are sub-second.

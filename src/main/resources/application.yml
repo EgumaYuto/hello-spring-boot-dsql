@@ -25,11 +25,14 @@ spring:
     hikari:
       # DSQL closes connections after 60 minutes; recycle well before that.
       max-lifetime: 1500000   # 25 minutes (ms)
-      # One connection per Lambda execution environment is plenty.
-      maximum-pool-size: 1
+      maximum-pool-size: 2
+      minimum-idle: 0
   jooq:
     sql-dialect: POSTGRES
   flyway:
-    enabled: true
-    # DSQL has no pre-existing baseline; let Flyway create its history table.
-    baseline-on-migrate: true
+    # Flyway is NOT run inside Lambda for DSQL: creating its flyway_schema_history
+    # table involves a secondary index, which DSQL only allows via CREATE INDEX
+    # ASYNC (built + polled on a separate connection). That deadlocks/stalls during
+    # a Lambda cold start. Instead the schema is provisioned out-of-band once with
+    # the `dsqlInit` Gradle task (plain JDBC, single DDL, no secondary index).
+    enabled: false
