@@ -1,4 +1,6 @@
-# Default profile: local development against the docker-compose Postgres.
+# Common + default profile: local development against the docker-compose Postgres.
+# Profile-specific overrides live in application-<profile>.yml (e.g. application-dsql.yml),
+# loaded when that profile is active (SPRING_PROFILES_ACTIVE=...).
 spring:
   datasource:
     url: jdbc:postgresql://127.0.0.1:5432/hellodb
@@ -9,40 +11,3 @@ spring:
     sql-dialect: POSTGRES
   flyway:
     enabled: true
-
----
-# Structured (ECS JSON) console logging on Lambda: each log event — including
-# full stack traces — becomes a single JSON line, so CloudWatch shows it as one
-# tidy, filterable event instead of one event per stack-trace line. Local dev
-# (default profile) keeps the human-readable plain text.
-# NB: `logging` is a top-level key, not under `spring`.
-logging:
-  structured:
-    format:
-      console: ecs
-
-# `dsql` profile: Aurora DSQL via the AWS JDBC connector (IAM token auth, no password).
-# Activated in Lambda with SPRING_PROFILES_ACTIVE=dsql. The cluster URL is injected
-# by Terraform via SPRING_DATASOURCE_URL, e.g.
-#   jdbc:aws-dsql:postgresql://<cluster-id>.dsql.<region>.on.aws:5432/postgres
-spring:
-  config:
-    activate:
-      on-profile: dsql
-  datasource:
-    username: admin
-    driver-class-name: software.amazon.dsql.jdbc.DSQLConnector
-    hikari:
-      # DSQL closes connections after 60 minutes; recycle well before that.
-      max-lifetime: 1500000   # 25 minutes (ms)
-      maximum-pool-size: 2
-      minimum-idle: 0
-  jooq:
-    sql-dialect: POSTGRES
-  flyway:
-    # Flyway is NOT run inside Lambda for DSQL: creating its flyway_schema_history
-    # table involves a secondary index, which DSQL only allows via CREATE INDEX
-    # ASYNC (built + polled on a separate connection). That deadlocks/stalls during
-    # a Lambda cold start. Instead the schema is provisioned out-of-band once with
-    # the `dsqlInit` Gradle task (plain JDBC, single DDL, no secondary index).
-    enabled: false
