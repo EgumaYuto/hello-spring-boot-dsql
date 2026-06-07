@@ -1,0 +1,9 @@
+style:
+  MaxLineLength:
+    active: true
+    maxLineLength: 120
+
+complexity:
+  CognitiveComplexMethod:
+    active: true
+    threshold: 7

@@ -1,0 +1,35 @@
+# Default profile: local development against the docker-compose Postgres.
+spring:
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:5432/hellodb
+    username: hellouser
+    password: hellopassword
+    driver-class-name: org.postgresql.Driver
+  jooq:
+    sql-dialect: POSTGRES
+  flyway:
+    enabled: true
+
+---
+# `dsql` profile: Aurora DSQL via the AWS JDBC connector (IAM token auth, no password).
+# Activated in Lambda with SPRING_PROFILES_ACTIVE=dsql. The cluster URL is injected
+# by Terraform via SPRING_DATASOURCE_URL, e.g.
+#   jdbc:aws-dsql:postgresql://<cluster-id>.dsql.<region>.on.aws:5432/postgres
+spring:
+  config:
+    activate:
+      on-profile: dsql
+  datasource:
+    username: admin
+    driver-class-name: software.amazon.dsql.jdbc.DSQLConnector
+    hikari:
+      # DSQL closes connections after 60 minutes; recycle well before that.
+      max-lifetime: 1500000   # 25 minutes (ms)
+      # One connection per Lambda execution environment is plenty.
+      maximum-pool-size: 1
+  jooq:
+    sql-dialect: POSTGRES
+  flyway:
+    enabled: true
+    # DSQL has no pre-existing baseline; let Flyway create its history table.
+    baseline-on-migrate: true

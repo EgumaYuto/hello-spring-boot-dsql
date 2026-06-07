@@ -1,0 +1,20 @@
+version: '3.8'
+
+# Local development database. Aurora DSQL is PostgreSQL-compatible, so we use a
+# plain Postgres container locally for Flyway migrations and jOOQ code generation.
+services:
+  postgres:
+    image: postgres:16
+    container_name: hello_spring_boot_dsql_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: hellodb
+      POSTGRES_USER: hellouser
+      POSTGRES_PASSWORD: hellopassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
