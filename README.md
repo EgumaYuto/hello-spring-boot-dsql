@@ -125,6 +125,23 @@ A single Terraform stack (`infra/aws/`, local state):
 - IAM role granting the Lambda `dsql:DbConnectAdmin` on the cluster (no secrets).
 - CloudWatch log group.
 
+## Logs
+
+On Lambda (the `dsql` profile) the app uses Spring Boot 3.4 structured logging
+(`logging.structured.format.console: ecs`), so each log event — stack traces
+included — is a single ECS-JSON line. That keeps CloudWatch readable (one event
+per log, not one per stack-trace line) and queryable, e.g. in Logs Insights:
+
+```
+fields @timestamp, `log.level`, `log.logger`, message, `error.stack_trace`
+| filter `log.level` = "ERROR"
+| sort @timestamp desc
+```
+
+Local dev keeps the plain-text format. (The Lambda *platform* lines —
+`START`/`END`/`REPORT` — stay text; flip them to JSON too via the function's
+`logging_config { log_format = "JSON" }` if you want.)
+
 ## Status
 
 Verified end-to-end against a real Aurora DSQL cluster + Lambda Function URL in
